@@ -7,6 +7,7 @@ import glob
 import struct
 import re
 import os
+import traceback
 
 import numpy as np
 import pandas as pd
@@ -19,7 +20,17 @@ except ImportError:
     import xml.etree.ElementTree as ET
 
 # cython imports
-import hatchet.cython_modules.libs.subtract_metrics as smc
+try:
+    import hatchet.cython_modules.libs.subtract_metrics as smc
+except ImportError:
+    print("-" * 80)
+    print(
+        """Error: Shared object (.so) not found for cython module.\n\tPlease run install.sh from the hatchet root directory to build modules."""
+    )
+    print("-" * 80)
+    traceback.print_exc()
+    raise
+
 
 import hatchet.graphframe
 from hatchet.node import Node
@@ -90,6 +101,7 @@ class HPCToolkitReader:
         # number of thread 0 metric-db files (i.e., number of ranks), then
         # uses this as the divisor to the total number of metric-db files.
         metricdb_numranks_files = glob.glob(self.dir_name + "/*-000-*.metric-db")
+        self.num_ranks = len(metricdb_numranks_files)
         self.num_threads_per_rank = int(
             self.num_metricdb_files / len(metricdb_numranks_files)
         )
@@ -199,11 +211,11 @@ class HPCToolkitReader:
             del self.df_metrics["thread"]
 
         # used to speedup parse_xml_node
-        self.np_metrics = self.df_metrics[self.metric_columns].to_numpy()
-        self.np_nids = self.df_metrics["nid"].to_numpy()
+        self.np_metrics = self.df_metrics[self.metric_columns].values
 
-        # from subtract_metrics.pyx
-        smc.set_np_nids_memview(self.np_nids, self.np_nids.shape[0])
+        # getting the number of execution threads for our stride in
+        # subtract_exclusive_metric_vals/ num nodes is already calculated
+        self.total_execution_threads = self.num_threads_per_rank * self.num_ranks
 
     def read(self):
         """Read the experiment.xml file to extract the calling context tree and create
@@ -364,7 +376,11 @@ class HPCToolkitReader:
             for i, column in enumerate(self.metric_columns):
                 if "(inc)" not in column:
                     smc.subtract_exclusive_metric_vals(
-                        nid, parent_nid, self.np_metrics.T[i]
+                        nid,
+                        parent_nid,
+                        self.np_metrics.T[i],
+                        self.total_execution_threads,
+                        self.num_nodes
                     )
 
         if xml_tag == "C" or (
