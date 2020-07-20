@@ -18,11 +18,15 @@ try:
 except ImportError:
     import xml.etree.ElementTree as ET
 
+# cython imports
+import hatchet.cython_modules.libs.subtract_metrics as smc
+
 import hatchet.graphframe
 from hatchet.node import Node
 from hatchet.graph import Graph
 from hatchet.util.timer import Timer
 from hatchet.frame import Frame
+
 
 src_file = 0
 
@@ -194,6 +198,13 @@ class HPCToolkitReader:
         if self.num_threads_per_rank == 1:
             del self.df_metrics["thread"]
 
+        # used to speedup parse_xml_node
+        self.np_metrics = self.df_metrics[self.metric_columns].to_numpy()
+        self.np_nids = self.df_metrics["nid"].to_numpy()
+
+        # from subtract_metrics.pyx
+        smc.set_np_nids_memview(self.np_nids, self.np_nids.shape[0])
+
     def read(self):
         """Read the experiment.xml file to extract the calling context tree and create
         a dataframe out of it. Then merge the two dataframes to create the final
@@ -241,6 +252,11 @@ class HPCToolkitReader:
             # start graph construction at the root
             with self.timer.phase("graph construction"):
                 self.parse_xml_children(root, graph_root)
+
+            # put updated metrics back in dataframe
+            for i, column in enumerate(self.metric_columns):
+                if "(inc)" not in column:
+                    self.df_metrics[column] = self.np_metrics.T[i]
 
         with self.timer.phase("graph construction"):
             graph = Graph(list_roots)
@@ -345,17 +361,10 @@ class HPCToolkitReader:
 
             # when we reach statement nodes, we subtract their exclusive
             # metric values from the parent's values
-            for column in self.metric_columns:
+            for i, column in enumerate(self.metric_columns):
                 if "(inc)" not in column:
-                    self.df_metrics.loc[
-                        self.df_metrics["nid"] == parent_nid, column
-                    ] = (
-                        self.df_metrics.loc[
-                            self.df_metrics["nid"] == parent_nid, column
-                        ]
-                        - self.df_metrics.loc[
-                            self.df_metrics["nid"] == nid, column
-                        ].values
+                    smc.subtract_exclusive_metric_vals(
+                        nid, parent_nid, self.np_metrics.T[i]
                     )
 
         if xml_tag == "C" or (
