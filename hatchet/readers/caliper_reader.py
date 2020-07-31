@@ -15,7 +15,7 @@ import hatchet.graphframe
 from hatchet.node import Node
 from hatchet.graph import Graph
 from hatchet.frame import Frame
-from hatchet.util.timer import Timer
+from hatchet.util.profiler import Timer
 from hatchet.util.executable import which
 
 
@@ -74,11 +74,22 @@ class CaliperReader:
         self.json_cols_mdata = json_obj["column_metadata"]
         self.json_nodes = json_obj["nodes"]
 
+        # decide which column to use as the primary path hierarchy
+        # first preference to callpath if available
+        if "source.function#callpath.address" in self.json_cols:
+            self.path_col_name = "source.function#callpath.address"
+            self.node_type = "function"
+        elif "path" in self.json_cols:
+            self.path_col_name = "path"
+            self.node_type = "region"
+        else:
+            sys.exit("No hierarchy column in input file")
+
         # remove data entries containing None in `path` column (null in json file)
         # first, get column where `path` data is
         # then, parse json_data list of lists to identify lists containing None in
         # `path` column
-        path_col = self.json_cols.index("path")
+        path_col = self.json_cols.index(self.path_col_name)
         entries_to_remove = []
         for sublist in self.json_data:
             if sublist[path_col] is None:
@@ -86,15 +97,6 @@ class CaliperReader:
         # then, remove them from the json_data list
         for i in entries_to_remove:
             self.json_data.remove(i)
-
-        # decide which column to use as the primary path hierarchy
-        # first preference to callpath if available
-        if "source.function#callpath.address" in self.json_cols:
-            self.path_col_name = "source.function#callpath.address"
-        elif "path" in self.json_cols:
-            self.path_col_name = "path"
-        else:
-            sys.exit("No hierarchy column in input file")
 
         # change column names
         for idx, item in enumerate(self.json_cols):
@@ -106,9 +108,12 @@ class CaliperReader:
                 self.json_cols[idx] = "rank"
             if item == "module#cali.sampler.pc":
                 self.json_cols[idx] = "module"
-            if item == "sum#time.duration":
+            if item == "sum#time.duration" or item == "sum#avg#sum#time.duration":
                 self.json_cols[idx] = "time"
-            if item == "inclusive#sum#time.duration":
+            if (
+                item == "inclusive#sum#time.duration"
+                or item == "sum#avg#inclusive#sum#time.duration"
+            ):
                 self.json_cols[idx] = "time (inc)"
 
         # make list of metric columns
@@ -129,7 +134,7 @@ class CaliperReader:
                 if "parent" not in node:
                     # since this node does not have a parent, this is a root
                     graph_root = Node(
-                        Frame({"type": "function", "name": node_label}), None
+                        Frame({"type": self.node_type, "name": node_label}), None
                     )
                     list_roots.append(graph_root)
 
@@ -142,7 +147,8 @@ class CaliperReader:
                 else:
                     parent_hnode = (self.idx_to_node[node["parent"]])["node"]
                     hnode = Node(
-                        Frame({"type": "function", "name": node_label}), parent_hnode
+                        Frame({"type": self.node_type, "name": node_label}),
+                        parent_hnode,
                     )
                     parent_hnode.add_child(hnode)
 
@@ -163,8 +169,6 @@ class CaliperReader:
 
         with self.timer.phase("graph construction"):
             list_roots = self.create_graph()
-            graph = Graph(list_roots)
-            graph.enumerate_traverse()
 
         # create a dataframe of metrics from the data section
         self.df_json_data = pd.DataFrame(self.json_data, columns=self.json_cols)
@@ -310,6 +314,10 @@ class CaliperReader:
 
         self.df_missing = pd.DataFrame.from_dict(data=missing_nodes)
         self.df_metrics = pd.concat([self.df_fixed_data, self.df_missing])
+
+        # create a graph object once all the nodes have been added
+        graph = Graph(list_roots)
+        graph.enumerate_traverse()
 
         # merge the metrics and node dataframes on the idx column
         with self.timer.phase("data frame"):
