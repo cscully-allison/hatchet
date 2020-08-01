@@ -1,4 +1,5 @@
 import pstats
+import cProfile
 import os
 from hatchet.util.profiler import Profiler
 
@@ -8,73 +9,59 @@ def f():
         for j in range(1000):
             i * j
 
-
-def test_start():
+def debug():
     prf = Profiler()
-    prf.start()
-    prf.end()
-    t_1 = prf.getRuntime()
 
-    prf.start()
-    f()
-    prf.end()
-    t_2 = prf.getRuntime()
-    assert t_1 != t_2
-
-
-def test_end():
-    prf = Profiler()
-    prf.start()
-    f()
-    prf.end()
-    t_1 = pstats.Stats(prf.prf).__dict__["total_tt"]
-    t_2 = pstats.Stats(prf.prf).__dict__["total_tt"]
-    assert t_1 == t_2
-
-
-def test_reset():
-    prf = Profiler()
-    prf.start()
-    f()
-    prf.end()
-    prf.reset()
-
-    assert {} == prf.prf.__dict__
-
-
-def test_getters():
-    runs = 3
-
-    prf = Profiler()
-    for i in range(runs):
-        prf.start()
+    with prf.phase("test"):
         f()
-        prf.end()
 
-    assert prf.getRuntime() == pstats.Stats(prf.prf).__dict__["total_tt"]
-    assert (
-        prf.getAverageRuntime(runs) == pstats.Stats(prf.prf).__dict__["total_tt"] / runs
-    )
-    assert prf.getRuntime() != prf.getAverageRuntime(runs)
-
-
-def test_f_output():
-    runs = 3
-    file = "test.txt"
-    prf = Profiler()
-    global f
-
-    for i in range(runs):
-        prf.start()
+    with prf.phase("test-outer"):
         f()
-        prf.end()
+        with prf.phase("test-inner"):
+            f()
+        with prf.phase("test-inner2"):
+            f()
 
-    prf.dumpAverageStats("cumulative", file, runs)
-    assert os.path.exists(file)
+    prf.write_to_file()
 
-    with open(file, "r") as f:
-        lines = f.readlines()
 
-    assert "Averaged over {} trials".format(runs) in lines[2]
 
-    os.remove(file)
+def test_timer_funct():
+    prf = Profiler()
+
+    with prf.phase("test"):
+        f()
+    assert "test" in prf._times
+
+    t1 = prf._times["test"]
+    with prf.phase("test"):
+        f()
+    t2 = prf._times["test"]
+    assert t1 < t2
+
+    with prf.phase("test-outer"):
+        f()
+        with prf.phase("test-inner"):
+            f()
+        with prf.phase("test-inner2"):
+            f()
+
+    assert prf._times["test-inner"] + prf._times["test-inner2"] < prf._times["test-outer"]
+
+def test_profiler_funct():
+    prf = Profiler()
+
+    with prf.phase("test"):
+        f()
+    assert "test" in prf._profiles
+    assert type(prf._profiles["test"]) == type(cProfile.Profile())
+
+    with prf.phase("test-outer"):
+        f()
+        with prf.phase("test-inner"):
+            f()
+        with prf.phase("test-inner2"):
+            f()
+
+
+debug()

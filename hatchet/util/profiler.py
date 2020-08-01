@@ -51,22 +51,65 @@ class Profiler:
         out = StringIO()
         out.write("Times:\n")
         for phase, delta in self._times.items():
-            out.write("    %-20s %.2fs\n" % (phase + ":", delta.total_seconds()))
+            out.write("    %-20s %.2fs\n" % (phase + ":", delta))
         return out.getvalue()
 
     # sorting options
     # 'calls', 'cumulative', 'filename', 'ncalls', 'pcalls', 'line', 'name', 'nfl' (name file line), 'stdname', 'time'
     def write_to_file(self, sortby="cumulative", filename="prof.txt"):
         """
-            Description: Dump the total statistics from this current profile to a
-            file. Cleared by calls to reset. If running profile over multiple trials,
-            this dumps cumulative runtime across all trials: use dumpAverageStats()
-            instead.
+            Description: Dump the total statistics from this current profile organized
+            by phase
         """
+
         with open(filename, "w") as f:
-            sts = pstats.Stats(self.prf, stream=f)
-            sts.sort_stats(sortby)
-            sts.print_stats()
+            pass
+
+        for profile in self._profiles:
+            with open(profile+"_temp.txt", "w") as f:
+                sts = pstats.Stats(self._profiles[profile], stream=f)
+                sts.sort_stats(sortby)
+                sts.print_stats()
+                # sts.print_callers()
+            with open(profile+"_temp.txt", "r") as f:
+                lines = f.readlines()
+
+            output = []
+            for i, line in enumerate(lines):
+                if line == '\n':
+                    continue
+                elif i == 0 or i == 2:
+                    output.append("# " + line)
+                elif i == 4:
+                    cols = line.split()
+                    cols.insert(0, "phase")
+                    line = "\t".join(cols) + '\n'
+                    output.append(line)
+                else:
+                    cols = line.split()
+                    new_cols = []
+                    for i in range(len(cols)):
+                        if cols[i] == "{":
+                            single_name = ""
+                            single_name += cols[i]
+                            i += 1
+                            while cols[i] != "}":
+                                single_name += cols[i] + " "
+                            single_name += cols[i]
+                            new_cols.append(single_name)
+                        else:
+                            new_cols.append(cols[i])
+                    new_cols.insert(0,profile)
+                    line = "\t".join(new_cols) + '\n'
+                    output.append(line)
+
+            with open(filename, "a") as f:
+                f.writelines(output)
+
+
+
+
+
 
     @contextmanager
     def phase(self, name):
