@@ -1,4 +1,4 @@
-.. Copyright 2017-2020 Lawrence Livermore National Security, LLC and other
+.. Copyright 2017-2021 Lawrence Livermore National Security, LLC and other
    Hatchet Project Developers. See the top-level LICENSE file for details.
 
    SPDX-License-Identifier: MIT
@@ -21,11 +21,11 @@ operations to analyze a single hierarchical data set or compare multiple data
 sets, and its API facilitates analyzing such data programmatically.
 
 You can get hatchet from its `GitHub repository
-<https://github.com/LLNL/hatchet>`_:
+<https://github.com/hatchet/hatchet>`_:
 
 .. code-block:: console
 
-  $ git clone https://github.com/LLNL/hatchet.git
+  $ git clone https://github.com/hatchet/hatchet.git
 
 or install it using pip:
 
@@ -63,6 +63,12 @@ following `paper <http://www.cs.umd.edu/~bhatele/pubs/pdf/2019/sc2019.pdf>`_:
    :caption: Tutorials
 
    basic_tutorial
+
+.. toctree::
+   :maxdepth: 2
+   :caption: References
+
+   publications
 
 .. toctree::
    :maxdepth: 2

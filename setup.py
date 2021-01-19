@@ -1,4 +1,4 @@
-# Copyright 2017-2020 Lawrence Livermore National Security, LLC and other
+# Copyright 2017-2021 Lawrence Livermore National Security, LLC and other
 # Hatchet Project Developers. See the top-level LICENSE file for details.
 #
 # SPDX-License-Identifier: MIT
@@ -25,7 +25,7 @@ setup(
     name="hatchet",
     version=version["__version__"],
     description="A Python library for analyzing hierarchical performance data",
-    url="https://github.com/LLNL/hatchet",
+    url="https://github.com/hatchet/hatchet",
     author="Abhinav Bhatele",
     author_email="bhatele@cs.umd.edu",
     license="MIT",

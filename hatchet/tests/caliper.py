@@ -1,4 +1,4 @@
-# Copyright 2017-2020 Lawrence Livermore National Security, LLC and other
+# Copyright 2017-2021 Lawrence Livermore National Security, LLC and other
 # Hatchet Project Developers. See the top-level LICENSE file for details.
 #
 # SPDX-License-Identifier: MIT
@@ -195,4 +195,6 @@ def test_graphframe_to_literal(lulesh_caliper_json):
     gf = GraphFrame.from_caliper_json(str(lulesh_caliper_json))
     graph_literal = gf.to_literal()
 
-    assert len(graph_literal) == len(gf.graph.roots)
+    gf2 = GraphFrame.from_literal(graph_literal)
+
+    assert len(gf.graph) == len(gf2.graph)

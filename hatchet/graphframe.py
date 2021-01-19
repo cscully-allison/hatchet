@@ -1,14 +1,16 @@
-# Copyright 2017-2020 Lawrence Livermore National Security, LLC and other
+# Copyright 2017-2021 Lawrence Livermore National Security, LLC and other
 # Hatchet Project Developers. See the top-level LICENSE file for details.
 #
 # SPDX-License-Identifier: MIT
 
 import sys
 import traceback
+
 from collections import defaultdict
 
 import pandas as pd
 import numpy as np
+import multiprocess as mp
 
 from .node import Node
 from .graph import Graph
@@ -19,7 +21,7 @@ from .util.dot import trees_to_dot
 from .util.deprecated import deprecated_params
 
 try:
-    import hatchet.cython_modules.libs.graphframe_modules as _gfm_cy
+    from .cython_modules.libs import graphframe_modules as _gfm_cy
 except ImportError:
     print("-" * 80)
     print(
@@ -28,6 +30,14 @@ except ImportError:
     print("-" * 80)
     traceback.print_exc()
     raise
+
+
+def parallel_apply(filter_function, dataframe, queue):
+    """A function called in parallel, which does a pandas apply on part of a
+    dataframe and returns the results via multiprocessing queue function."""
+    filtered_rows = dataframe.apply(filter_function, axis=1)
+    filtered_df = dataframe[filtered_rows]
+    queue.put(filtered_df)
 
 
 class GraphFrame:
@@ -125,117 +135,87 @@ class GraphFrame:
         return CProfileReader(filename).read()
 
     @staticmethod
-    def from_literal(graph_dict):
-        """Create a GraphFrame from a list of dictionaries.
+    def from_pyinstrument(filename):
+        """Read in a JSON file generated using Pyinstrument."""
+        # import this lazily to avoid circular dependencies
+        from .readers.pyinstrument_reader import PyinstrumentReader
 
-        TODO: calculate inclusive metrics automatically.
+        return PyinstrumentReader(filename).read()
 
-        Example:
+    @staticmethod
+    def from_timemory(input=None, select=None):
+        """Read in timemory data.
 
-        .. code-block:: console
+        Links:
+            https://github.com/NERSC/timemory
+            https://timemory.readthedocs.io
 
-            dag_ldict = [
-                {
-                    "name": "A",
-                    "type": "function",
-                    "metrics": {"time (inc)": 130.0, "time": 0.0},
-                    "children": [
-                        {
-                            "name": "B",
-                            "type": "function",
-                            "metrics": {"time (inc)": 20.0, "time": 5.0},
-                            "children": [
-                                {
-                                    "name": "C",
-                                    "type": "function",
-                                    "metrics": {"time (inc)": 5.0, "time": 5.0},
-                                    "children": [
-                                        {
-                                            "name": "D",
-                                            "type": "function",
-                                            "metrics": {"time (inc)": 8.0, "time": 1.0},
-                                        }
-                                    ],
-                                }
-                            ],
-                        },
-                        {
-                            "name": "E",
-                            "type": "function",
-                            "metrics": {"time (inc)": 55.0, "time": 10.0},
-                            "children": [
-                                {
-                                    "name": "H",
-                                    "type": "function",
-                                    "metrics": {"time (inc)": 1.0, "time": 9.0}
-                                }
-                            ],
-                        },
-                    ],
-                }
-            ]
+        Arguments:
+            input (str or file-stream or dict or None):
+                Valid argument types are:
 
-        Return:
-            (GraphFrame): graphframe containing data from dictionaries
+                1. Filename for a timemory JSON tree file
+                2. Open file stream to one of these files
+                3. Dictionary from timemory JSON tree
+
+                    Currently, timemory supports two JSON layouts: flat and tree.
+                The former is a 1D-array representation of the hierarchy which
+                represents the hierarchy via indentation schemes in the labels
+                and is not compatible with hatchet. The latter is a hierarchical
+                representation of the data and is the required JSON layout when
+                using hatchet. Timemory JSON tree files typically have the
+                extension ".tree.json".
+
+                If input is None, this assumes that timemory has been
+                recording data within the application that is using hatchet.
+                In this situation, this method will attempt to import the
+                data directly from timemory.
+                    At the time of this writing, the direct data import will:
+
+                1. Stop any currently collecting components
+                2. Aggregate child thread data of the calling thread
+                3. Clear all data on the child threads
+                4. Aggregate the data from any MPI and/or UPC++ ranks.
+
+                Thus, if MPI or UPC++ is used, every rank must call this routine.
+                The zeroth rank will have the aggregation and all the other non-zero
+                ranks will only have the rank-specific data.
+                    Whether or not the per-thread and per-rank data itself is
+                combined is controlled by the `collapse_threads` and `collapse_processes`
+                attributes in the `timemory.settings` submodule.
+                    In the C++ API, it is possible for only #1 to be applied and data
+                can be obtained for an individual thread and/or rank without aggregation.
+                This is not currently available to Python, however, it can be made
+                available upon request via a GitHub Issue.
+
+            select (list of str):
+                A list of strings which match the component enumeration names
         """
+        from .readers.timemory_reader import TimemoryReader
 
-        def parse_node_literal(child_dict, hparent):
-            """Create node_dict for one node and then call the function
-            recursively on all children.
-            """
+        if input is not None:
+            try:
+                return TimemoryReader(input, select).read()
+            except IOError:
+                pass
+        else:
+            try:
+                import timemory
 
-            hnode = Node(
-                Frame({"name": child_dict["name"], "type": child_dict["type"]}), hparent
-            )
-
-            node_dicts.append(
-                dict(
-                    {"node": hnode, "name": child_dict["name"]}, **child_dict["metrics"]
+                TimemoryReader(timemory.get(hierarchy=True), select).read()
+            except ImportError:
+                print(
+                    "Error! timemory could not be imported. Provide filename, file stream, or dict."
                 )
-            )
-            hparent.add_child(hnode)
+                raise
 
-            if "children" in child_dict:
-                for child in child_dict["children"]:
-                    parse_node_literal(child, hnode)
+    @staticmethod
+    def from_literal(graph_dict):
+        """Create a GraphFrame from a list of dictionaries."""
+        # import this lazily to avoid circular dependencies
+        from .readers.literal_reader import LiteralReader
 
-        list_roots = []
-        node_dicts = []
-
-        # start with creating a node_dict for each root
-        for i in range(len(graph_dict)):
-            graph_root = Node(
-                Frame({"name": graph_dict[i]["name"], "type": graph_dict[i]["type"]}),
-                None,
-            )
-
-            node_dict = {"node": graph_root, "name": graph_dict[i]["name"]}
-            node_dict.update(**graph_dict[i]["metrics"])
-            node_dicts.append(node_dict)
-
-            list_roots.append(graph_root)
-
-            # call recursively on all children of root
-            if "children" in graph_dict[i]:
-                for child in graph_dict[i]["children"]:
-                    parse_node_literal(child, graph_root)
-
-        graph = Graph(list_roots)
-        graph.enumerate_traverse()
-
-        exc_metrics = []
-        inc_metrics = []
-        for key in graph_dict[i]["metrics"].keys():
-            if "(inc)" in key:
-                inc_metrics.append(key)
-            else:
-                exc_metrics.append(key)
-
-        dataframe = pd.DataFrame(data=node_dicts)
-        dataframe.set_index(["node"], inplace=True)
-        dataframe.sort_index(inplace=True)
-
-        return GraphFrame(graph, dataframe, exc_metrics, inc_metrics)
+        return LiteralReader(graph_dict).read()
 
     @staticmethod
     def from_lists(*lists):
@@ -308,8 +288,10 @@ class GraphFrame:
 
         self.dataframe = agg_df
 
-    def filter(self, filter_obj, squash=True):
+    def filter(self, filter_obj, squash=True, num_procs=mp.cpu_count()):
         """Filter the dataframe using a user-supplied function.
+
+        Note: Operates in parallel on user-supplied lambda functions.
 
         Arguments:
             filter_obj (callable, list, or QueryMatcher): the filter to apply to the GraphFrame.
@@ -323,9 +305,44 @@ class GraphFrame:
         filtered_df = None
 
         if callable(filter_obj):
-            filtered_rows = dataframe_copy.apply(filter_obj, axis=1)
-            filtered_df = dataframe_copy[filtered_rows]
+            # applying pandas filter using the callable function
+            if num_procs > 1:
+                # perform filter in parallel (default)
+                queue = mp.Queue()
+                processes = []
+                returned_frames = []
+                subframes = np.array_split(dataframe_copy, num_procs)
+
+                # Manually create a number of processes equal to the number of
+                # logical cpus available
+                for pid in range(num_procs):
+                    process = mp.Process(
+                        target=parallel_apply,
+                        args=(filter_obj, subframes[pid], queue),
+                    )
+                    process.start()
+                    processes.append(process)
+
+                # Stores filtered subframes in a list: 'returned_frames', for
+                # pandas concatenation. This intermediary list is used because
+                # pandas concat is faster when called only once on a list of
+                # dataframes, than when called multiple times appending onto a
+                # frame of increasing size.
+                for pid in range(num_procs):
+                    returned_frames.append(queue.get())
+
+                for proc in processes:
+                    proc.join()
+
+                filtered_df = pd.concat(returned_frames)
+
+            else:
+                # perform filter sequentiually if num_procs = 1
+                filtered_rows = dataframe_copy.apply(filter_obj, axis=1)
+                filtered_df = dataframe_copy[filtered_rows]
+
         elif isinstance(filter_obj, list) or isinstance(filter_obj, QueryMatcher):
+            # use a callpath query to apply the filter
             query = filter_obj
             if isinstance(filter_obj, list):
                 query = QueryMatcher(filter_obj)
@@ -513,19 +530,31 @@ class GraphFrame:
             # TODO: need a better way of aggregating inclusive metrics when
             # TODO: there is a multi-index
             try:
-                is_index_or_multiindex = isinstance(
+                is_multi_index = isinstance(
                     self.dataframe.index, pd.core.index.MultiIndex
                 )
             except AttributeError:
-                is_index_or_multiindex = isinstance(self.dataframe.index, pd.MultiIndex)
+                is_multi_index = isinstance(self.dataframe.index, pd.MultiIndex)
 
-            if is_index_or_multiindex:
-                for i in self.dataframe.loc[(node), out_columns].index.unique():
-                    # TODO: if you take the list constructor away from the
-                    # TODO: assignment below, this assignment gives NaNs. Why?
-                    self.dataframe.loc[(node, i), out_columns] = list(
-                        function(self.dataframe.loc[(subgraph_nodes, i), columns])
-                    )
+            if is_multi_index:
+                for rank_thread in self.dataframe.loc[
+                    (node), out_columns
+                ].index.unique():
+                    # rank_thread is either rank or a tuple of (rank, thread).
+                    # We check if rank_thread is a tuple and if it is, we
+                    # create a tuple of (node, rank, thread). If not, we create
+                    # a tuple of (node, rank).
+                    if isinstance(rank_thread, tuple):
+                        df_index1 = (node,) + rank_thread
+                        df_index2 = (subgraph_nodes,) + rank_thread
+                    else:
+                        df_index1 = (node, rank_thread)
+                        df_index2 = (subgraph_nodes, rank_thread)
+
+                    for col in out_columns:
+                        self.dataframe.loc[df_index1, col] = [
+                            function(self.dataframe.loc[df_index2, col])
+                        ]
             else:
                 # TODO: if you take the list constructor away from the
                 # TODO: assignment below, this assignment gives NaNs. Why?
@@ -581,9 +610,6 @@ class GraphFrame:
         expand_names="expand_name",
         context="context_column",
         invert_colors="invert_colormap",
-        color="",
-        threshold="",
-        unicode="",
     )
     def tree(
         self,
@@ -597,9 +623,6 @@ class GraphFrame:
         depth=10000,
         highlight_name=False,
         invert_colormap=False,
-        color=None,  # remove in next release
-        threshold=None,  # remove in next release
-        unicode=None,  # remove in next release
     ):
         """Format this graphframe as a tree and return the resulting string."""
         color = sys.stdout.isatty()
@@ -616,7 +639,12 @@ class GraphFrame:
             if shell == "ZMQInteractiveShell":
                 color = True
 
-        return ConsoleRenderer(unicode=True, color=color).render(
+        if sys.version_info.major == 2:
+            unicode = False
+        elif sys.version_info.major == 3:
+            unicode = True
+
+        return ConsoleRenderer(unicode=unicode, color=color).render(
             self.graph.roots,
             self.dataframe,
             metric_column=metric_column,
@@ -718,6 +746,7 @@ class GraphFrame:
             node_name = self.dataframe.loc[df_index, name]
 
             node_dict["name"] = node_name
+            node_dict["frame"] = hnode.frame.attrs
             node_dict["metrics"] = metrics_to_dict(hnode)
 
             if hnode.children and hnode not in visited:
@@ -822,18 +851,18 @@ class GraphFrame:
         # called _missing_node
         if not self_not_in_other.empty:
             self.dataframe = self.dataframe.assign(
-                _missing_node=np.zeros(len(self.dataframe), dtype=np.ubyte)
+                _missing_node=np.zeros(len(self.dataframe), dtype=np.short)
             )
         if not other_not_in_self.empty:
-            # initialize with R to save filling in later
+            # initialize with 2 to save filling in later
             other_not_in_self = other_not_in_self.assign(
-                _missing_node=["R" for x in range(len(other_not_in_self))]
+                _missing_node=[int(2) for x in range(len(other_not_in_self))]
             )
 
             # add a new column to self if other has nodes not in self
             if self_not_in_other.empty:
                 self.dataframe["_missing_node"] = np.zeros(
-                    len(self.dataframe), dtype=np.ubyte
+                    len(self.dataframe), dtype=np.short
                 )
 
         # get lengths to pass into
@@ -845,11 +874,11 @@ class GraphFrame:
             self_missing_node = self.dataframe["_missing_node"].values
             snio_indices = self_not_in_other.index.values
 
-            # This function adds "L" to all nodes in self.dataframe['_missing_node'] which
-            # are in self but not in the other graphframe & convert from bytes to chars
-            _gfm_cy.add_L(snio_len, self_missing_node, snio_indices)
+            # This function adds 1 to all nodes in self.dataframe['_missing_node'] which
+            # are in self but not in the other graphframe
+            _gfm_cy.insert_one_for_self_nodes(snio_len, self_missing_node, snio_indices)
             self.dataframe["_missing_node"] = np.array(
-                [chr(n) for n in self_missing_node]
+                [n for n in self_missing_node], dtype=np.short
             )
 
         # for nodes that only exist in other, set the metric to be nan (since

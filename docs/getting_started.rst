@@ -1,4 +1,4 @@
-.. Copyright 2017-2020 Lawrence Livermore National Security, LLC and other
+.. Copyright 2017-2021 Lawrence Livermore National Security, LLC and other
    Hatchet Project Developers. See the top-level LICENSE file for details.
 
    SPDX-License-Identifier: MIT
@@ -18,18 +18,18 @@ Hatchet has the following minimum requirements, which must be installed before H
 #. numpy, and
 #. pandas
 
-Hatchet is available on `GitHub <https://github.com/LLNL/hatchet>`_.
+Hatchet is available on `GitHub <https://github.com/hatchet/hatchet>`_.
 
 
 Installation
 ============
 
 You can get hatchet from its `GitHub repository
-<https://github.com/LLNL/hatchet>`_ using this command:
+<https://github.com/hatchet/hatchet>`_ using this command:
 
 .. code-block:: console
 
-  $ git clone https://github.com/LLNL/hatchet.git
+  $ git clone https://github.com/hatchet/hatchet.git
 
 This will create a directory called ``hatchet``.
 
@@ -41,7 +41,7 @@ from the hatchet root directory:
 
 .. code-block:: console
 
-    $ source ./install.sh
+  $ source ./install.sh
 
 Note: The ``source`` keyword is required to update your PYTHONPATH environment
 variable. It is not necessary if you have already manually added the hatchet

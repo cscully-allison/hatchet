@@ -1,4 +1,4 @@
-# Copyright 2017-2020 Lawrence Livermore National Security, LLC and other
+# Copyright 2017-2021 Lawrence Livermore National Security, LLC and other
 # Hatchet Project Developers. See the top-level LICENSE file for details.
 #
 # SPDX-License-Identifier: MIT
@@ -86,8 +86,14 @@ def test_values():
 
 
 def test_repr():
-    assert repr(Frame(foo="baz", bar="quux")) == "Frame({'bar': 'quux', 'foo': 'baz'})"
+    assert (
+        repr(Frame(foo="baz", bar="quux"))
+        == "Frame({'bar': 'quux', 'foo': 'baz', 'type': 'None'})"
+    )
 
 
 def test_str():
-    assert str(Frame(foo="baz", bar="quux")) == "{'bar': 'quux', 'foo': 'baz'}"
+    assert (
+        str(Frame(foo="baz", bar="quux"))
+        == "{'bar': 'quux', 'foo': 'baz', 'type': 'None'}"
+    )

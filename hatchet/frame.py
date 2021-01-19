@@ -1,4 +1,4 @@
-# Copyright 2017-2020 Lawrence Livermore National Security, LLC and other
+# Copyright 2017-2021 Lawrence Livermore National Security, LLC and other
 # Hatchet Project Developers. See the top-level LICENSE file for details.
 #
 # SPDX-License-Identifier: MIT
@@ -41,6 +41,10 @@ class Frame:
 
         if not self.attrs:
             raise ValueError("Frame must be constructed with attributes!")
+
+        # add type to frame if type is not in the attributes dict or kwargs
+        if "type" not in self.attrs:
+            self.attrs["type"] = "None"
 
         self._tuple_repr = None
 

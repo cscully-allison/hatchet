@@ -1,4 +1,4 @@
-# Copyright 2017-2020 Lawrence Livermore National Security, LLC and other
+# Copyright 2017-2021 Lawrence Livermore National Security, LLC and other
 # Hatchet Project Developers. See the top-level LICENSE file for details.
 #
 # SPDX-License-Identifier: MIT
@@ -59,14 +59,18 @@ def test_traverse_dag():
 
 def test_node_repr():
     d = Node(Frame(a=1, b=2, c=3))
-    assert repr(d) == "Node({'a': 1, 'b': 2, 'c': 3})"
+    assert repr(d) == "Node({'a': 1, 'b': 2, 'c': 3, 'type': 'None'})"
 
 
 def test_path():
-    d = Node(Frame(name="d"))
+    d = Node(Frame(name="d", type="function"))
     node = Node.from_lists(["a", ["b", d]])
 
-    assert d.path() == (Frame(name="a"), Frame(name="b"), Frame(name="d"))
+    assert d.path() == (
+        Frame(name="a"),
+        Frame(name="b"),
+        Frame(name="d", type="function"),
+    )
     assert d.parents[0].path() == (Frame(name="a"), Frame(name="b"))
     assert node.path() == (Frame(name="a"),)
 
