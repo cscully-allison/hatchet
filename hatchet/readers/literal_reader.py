@@ -70,6 +70,11 @@ class LiteralReader:
         """Create node_dict for one node and then call the function
         recursively on all children.
         """
+
+        # pull out _hatchet_nid if it exists
+        if "_hatchet_nid" in node_dict:
+            hnid = node_dict.pop("_hatchet_nid")
+
         frame = Frame(child_dict["frame"])
         if "duplicate" not in child_dict:
             hnode = Node(frame, hparent)
